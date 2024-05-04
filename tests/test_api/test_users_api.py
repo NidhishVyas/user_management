@@ -259,20 +259,35 @@ async def test_create_user_duplicate_nickname(async_client, admin_token):
         ), "Did not handle duplicate nickname correctly"
 
 
+from unittest.mock import patch
+import pytest
+
 @pytest.mark.asyncio
 async def test_create_user_duplicate_email(async_client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
-    user_data = {
+    email = "test@example.com"
+    user_data_1 = {
         "nickname": generate_nickname(),
-        "email": "test@example.com",
+        "email": email,
         "password": "sS#fdasrongPassword123!",
         "role": "ADMIN",
     }
 
-    with patch(
-        "app.services.email_service.EmailService.send_verification_email"
-    ) as mock_send_email:
-        mock_send_email.return_value = None  # Ensure the mocked method does nothing
+    user_data_2 = {
+        "nickname": generate_nickname(),
+        "email": email,
+        "password": "AnotherStrongPassword123!",
+        "role": "ADMIN",
+    }
 
-        response = await async_client.post("/users/", json=user_data, headers=headers)
-        assert response.status_code == 400, "Duplicate email should result in an error"
+    with patch("app.services.email_service.EmailService.send_verification_email") as mock_send_email:
+        mock_send_email.return_value = None  # Assume sending email is successfully mocked
+
+        # Create the first user
+        response1 = await async_client.post("/users/", json=user_data_1, headers=headers)
+        assert response1.status_code == 201, "Failed to create first user"
+
+        # Attempt to create a second user with the same email
+        response2 = await async_client.post("/users/", json=user_data_2, headers=headers)
+        assert response2.status_code == 400, "Duplicate email should result in an error"
+
