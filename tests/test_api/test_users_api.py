@@ -262,6 +262,7 @@ async def test_create_user_duplicate_nickname(async_client, admin_token):
 from unittest.mock import patch
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_create_user_duplicate_email(async_client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -280,14 +281,43 @@ async def test_create_user_duplicate_email(async_client, admin_token):
         "role": "ADMIN",
     }
 
-    with patch("app.services.email_service.EmailService.send_verification_email") as mock_send_email:
-        mock_send_email.return_value = None  # Assume sending email is successfully mocked
+    with patch(
+        "app.services.email_service.EmailService.send_verification_email"
+    ) as mock_send_email:
+        mock_send_email.return_value = (
+            None  # Assume sending email is successfully mocked
+        )
 
         # Create the first user
-        response1 = await async_client.post("/users/", json=user_data_1, headers=headers)
+        response1 = await async_client.post(
+            "/users/", json=user_data_1, headers=headers
+        )
         assert response1.status_code == 201, "Failed to create first user"
 
         # Attempt to create a second user with the same email
-        response2 = await async_client.post("/users/", json=user_data_2, headers=headers)
+        response2 = await async_client.post(
+            "/users/", json=user_data_2, headers=headers
+        )
         assert response2.status_code == 400, "Duplicate email should result in an error"
 
+
+@pytest.mark.asyncio
+async def test_list_users_invalid_skip_integer(async_client, admin_token):
+    response = await async_client.get(
+        "/users/",
+        params={"skip": -1},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Skip integer cannot be less than 0"
+
+
+@pytest.mark.asyncio
+async def test_list_users_invalid_limit_integer(async_client, admin_token):
+    response = await async_client.get(
+        "/users/",
+        params={"limit": 0},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Limit integer cannot be less than 1"
