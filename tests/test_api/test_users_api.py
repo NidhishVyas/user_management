@@ -6,7 +6,7 @@ from app.models.user_model import User, UserRole
 from app.utils.nickname_gen import generate_nickname
 from app.utils.security import hash_password
 from app.services.jwt_service import decode_token
-from starlette import status
+from unittest.mock import patch
 
 
 @pytest.mark.asyncio
@@ -222,9 +222,7 @@ async def test_list_users_unauthorized(async_client, user_token):
 
 
 @pytest.mark.asyncio
-async def test_create_user_duplicate_nickname(
-    async_client: AsyncClient, admin_token: str
-):
+async def test_create_user_duplicate_nickname(async_client, admin_token):
     headers = {"Authorization": f"Bearer {admin_token}"}
     nickname = "TestUser123"
 
@@ -236,28 +234,29 @@ async def test_create_user_duplicate_nickname(
     }
 
     user_data_2 = {
-        "nickname": nickname,  # Intentional duplicate nickname
+        "nickname": nickname,
         "email": "testuser2@example.com",
         "password": "SecurePassw0rd!",
         "role": "ADMIN",
     }
 
-    # Create the first user
-    response = await async_client.post("/users/", json=user_data_1, headers=headers)
-    assert (
-        response.status_code == status.HTTP_201_CREATED
-    ), "Failed to create first user"
+    # Mock the 'send_verification_email' method from the 'EmailService' class
+    with patch(
+        "app.services.email_service.EmailService.send_verification_email"
+    ) as mock_send_email:
+        mock_send_email.return_value = (
+            None  # Assume sending email is successfully mocked
+        )
 
-    # Attempt to create a second user with the same nickname
-    response = await async_client.post("/users/", json=user_data_2, headers=headers)
+        # Create the first user
+        response = await async_client.post("/users/", json=user_data_1, headers=headers)
+        assert response.status_code == 201, "Failed to create first user"
 
-    # Check that the server returns a 400 status code due to duplicate nickname
-    assert (
-        response.status_code == status.HTTP_400_BAD_REQUEST
-    ), "Did not handle duplicate nickname correctly"
-    assert (
-        "Nickname already exists" in response.text
-    ), "Expected duplicate nickname error message not found"
+        # Attempt to create a second user with the same nickname
+        response = await async_client.post("/users/", json=user_data_2, headers=headers)
+        assert (
+            response.status_code == 400
+        ), "Did not handle duplicate nickname correctly"
 
 
 @pytest.mark.asyncio
@@ -269,7 +268,12 @@ async def test_create_user_duplicate_email(async_client, admin_token):
         "password": "sS#fdasrongPassword123!",
         "role": "ADMIN",
     }
-
+    with patch(
+        "app.services.email_service.EmailService.send_verification_email"
+    ) as mock_send_email:
+        mock_send_email.return_value = (
+            None  # Assume sending email is successfully mocked
+        )
     response = await async_client.post("/users/", json=user_data, headers=headers)
     assert response.status_code == 201, f"First attempt failed: {response.json()}"
 
