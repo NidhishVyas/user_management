@@ -138,7 +138,7 @@ async def test_login_incorrect_password(async_client, verified_user):
 
 @pytest.mark.asyncio
 async def test_login_unverified_user(async_client, unverified_user):
-    form_data = {"username": unverified_user.email, "password": "MySuperPassword$1234"}
+    form_data = {"username": unverified_user.email, "password": "MySuperPassword$123"}
     response = await async_client.post(
         "/login/",
         data=urlencode(form_data),
