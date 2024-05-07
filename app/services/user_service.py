@@ -65,6 +65,8 @@ class UserService:
     ) -> Optional[User]:
         try:
             validated_data = UserCreate(**user_data).model_dump()
+            if "profile_picture_url" in validated_data.keys():
+                validated_data.pop("profile_picture_url")
             existing_user_email = await cls.get_by_email(
                 session, validated_data["email"]
             )
@@ -108,7 +110,8 @@ class UserService:
         try:
             # validated_data = UserUpdate(**update_data).dict(exclude_unset=True)
             validated_data = UserUpdate(**update_data).model_dump(exclude_unset=True)
-
+            if "profile_picture_url" in validated_data.keys():
+                validated_data.pop("profile_picture_url")
             if "password" in validated_data:
                 validated_data["hashed_password"] = hash_password(
                     validated_data.pop("password")
@@ -122,7 +125,7 @@ class UserService:
             await cls._execute_query(session, query)
             updated_user = await cls.get_by_id(session, user_id)
             if updated_user:
-                session.refresh(
+                await session.refresh(
                     updated_user
                 )  # Explicitly refresh the updated user object
                 logger.info(f"User {user_id} updated successfully.")
@@ -162,12 +165,8 @@ class UserService:
     async def login_user(
         cls, session: AsyncSession, email: str, password: str
     ) -> Optional[User]:
-        user = await cls.get_by_email(session, email)
+        user = await cls.get_by_email(session, email.lower())
         if user:
-            if user.email_verified is False:
-                return None
-            if user.is_locked:
-                return None
             if verify_password(password, user.hashed_password):
                 user.failed_login_attempts = 0
                 user.last_login_at = datetime.now(timezone.utc)
@@ -184,8 +183,13 @@ class UserService:
 
     @classmethod
     async def is_account_locked(cls, session: AsyncSession, email: str) -> bool:
-        user = await cls.get_by_email(session, email)
+        user = await cls.get_by_email(session, email.lower())
         return user.is_locked if user else False
+
+    @classmethod
+    async def is_verified(cls, session: AsyncSession, email: str) -> bool:
+        user = await cls.get_by_email(session, email.lower())
+        return user.email_verified if user else False
 
     @classmethod
     async def reset_password(
@@ -210,8 +214,7 @@ class UserService:
         if user and user.verification_token == token:
             user.email_verified = True
             user.verification_token = None  # Clear the token once used
-            if user.role == UserRole.ANONYMOUS:
-                user.role = UserRole.AUTHENTICATED
+            user.role = UserRole.AUTHENTICATED
             session.add(user)
             await session.commit()
             return True
@@ -240,3 +243,32 @@ class UserService:
             await session.commit()
             return True
         return False
+
+    @classmethod
+    async def upload(
+        cls, session: AsyncSession, user_id: UUID, profile_image: Dict[str, str]
+    ) -> Optional[User]:
+        try:
+            validated_data = UserUpdate(**profile_image).model_dump(exclude_unset=True)
+            logger.info(f"heyyyyyy, {validated_data}")
+            query = (
+                update(User)
+                .where(User.id == user_id)
+                .values(**validated_data)
+                .execution_options(synchronize_session="fetch")
+            )
+            
+            await cls._execute_query(session, query)
+            updated_user = await cls.get_by_id(session, user_id)
+            if updated_user:
+                await session.refresh(
+                    updated_user
+                )  # Explicitly refresh the updated user object
+                logger.info(f"User {user_id} updated successfully.")
+                return updated_user
+            else:
+                logger.error(f"User {user_id} not found after update attempt.")
+            return None
+        except Exception as e:  # Broad exception handling for debugging
+            logger.error(f"Error during user update: {e}")
+            return None

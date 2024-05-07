@@ -9,14 +9,18 @@ from app.models.user_model import UserRole
 from app.utils.nickname_gen import generate_nickname
 
 
-def validate_url(url: Optional[str]) -> Optional[str]:
-    if url is None:
-        return url
-    url_regex = r"https?://(?:www\.)?[-\w]+(\.\w[-\w]*)+(/[-\w./?%&=]*)?"
-    if not re.match(url_regex, url):
-        raise ValueError("Invalid URL format")
-    return url
-
+def validate_url(cls, v):
+    regex = re.compile(
+        r'^(?:http|https)://'  # start with http:// or https://
+        r'(?:\S+(?::\S*)?@)?'  # user:pass authentication
+        r'(?:localhost|'  # localhost or...
+        r'[a-zA-Z0-9.-]+(?:\.[a-zA-Z]{2,})?)'  # domain...
+        r'(?::\d{2,5})?'  # optional port
+        r'(?:[/?#][^\s]*)?'  # path
+        r'$', re.IGNORECASE)
+    if v is not None and not regex.match(v):
+        raise ValueError('Invalid URL format')  # Custom error message
+    return v
 
 class UserBase(BaseModel):
     email: EmailStr = Field(..., example="john.doe@example.com")

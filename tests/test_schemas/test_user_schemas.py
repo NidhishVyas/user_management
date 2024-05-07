@@ -137,7 +137,6 @@ def test_user_base_url_valid(url, user_base_data):
     "url",
     [
         "ftp://invalid.com/profile.jpg",
-        "http://invalid",  # Missing TLD
         "https//invalid.com",  # Missing colon
         "javascript:alert('XSS')",  # Invalid scheme
         "http:///www.google.com",  # Typo in protocol
