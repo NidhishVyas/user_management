@@ -12,7 +12,7 @@ from app.utils.nickname_gen import generate_nickname
 def validate_url(url: Optional[str]) -> Optional[str]:
     if url is None:
         return url
-    url_regex = r"https?://(?:www\.)?[-\w]+(\.\w[-\w]*)+(/[-\w./?%&=]*)?"
+    url_regex = r"^(?:([A-Za-z]+):)?(\/{0,3})([0-9.\-A-Za-z]+)(?::(\d+))?(?:\/([^?#]*))?(?:\?([^#]*))?(?:#(.*))?$"
     if not re.match(url_regex, url):
         raise ValueError("Invalid URL format")
     return url

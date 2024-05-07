@@ -21,8 +21,18 @@ Key Highlights:
 from builtins import dict, int, len, str
 from datetime import timedelta
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Response,
+    File,
+    UploadFile,
+    status,
+    Request,
+)
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pytest import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user, get_db, get_email_service, require_role
 from app.schemas.pagination_schema import EnhancedPagination
@@ -37,6 +47,7 @@ from app.schemas.user_schemas import (
 )
 from app.services.user_service import UserService
 from app.services.jwt_service import create_access_token
+from app.utils.image_upload import upload, allowed_file, MAX_FILE_SIZE
 from app.utils.link_generation import create_user_links, generate_pagination_links
 from app.dependencies import get_settings
 from app.services.email_service import EmailService
@@ -297,57 +308,47 @@ async def register(
     raise HTTPException(status_code=400, detail="Email or Nickname already exists")
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 @router.post("/login/", response_model=TokenResponse, tags=["Login and Registration"])
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_db),
 ):
-    if await UserService.is_account_locked(session, form_data.username):
-        raise HTTPException(
-            status_code=400,
-            detail="Account locked due to too many failed login attempts.",
+    try:
+        logger.info(f"Received login request from {form_data.username}")
+
+        if await UserService.is_account_locked(session, form_data.username):
+            logger.warning(f"Account locked for {form_data.username}")
+            raise HTTPException(
+                status_code=400,
+                detail="Account locked due to too many failed login attempts.",
+            )
+
+        user = await UserService.login_user(
+            session, form_data.username, form_data.password
         )
-
-    user = await UserService.login_user(session, form_data.username, form_data.password)
-    if user:
-        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-
-        access_token = create_access_token(
-            data={"sub": user.email, "role": str(user.role.name)},
-            expires_delta=access_token_expires,
-        )
-
-        return {"access_token": access_token, "token_type": "bearer"}
-    raise HTTPException(status_code=401, detail="Incorrect email or password.")
-
-
-@router.post(
-    "/login/",
-    include_in_schema=False,
-    response_model=TokenResponse,
-    tags=["Login and Registration"],
-)
-async def login(
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    session: AsyncSession = Depends(get_db),
-):
-    if await UserService.is_account_locked(session, form_data.username):
-        raise HTTPException(
-            status_code=400,
-            detail="Account locked due to too many failed login attempts.",
-        )
-
-    user = await UserService.login_user(session, form_data.username, form_data.password)
-    if user:
-        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
-
-        access_token = create_access_token(
-            data={"sub": user.email, "role": str(user.role.name)},
-            expires_delta=access_token_expires,
-        )
-
-        return {"access_token": access_token, "token_type": "bearer"}
-    raise HTTPException(status_code=401, detail="Incorrect email or password.")
+        if user:
+            access_token_expires = timedelta(
+                minutes=settings.access_token_expire_minutes
+            )
+            access_token = create_access_token(
+                data={"sub": user.email, "role": str(user.role.name)},
+                expires_delta=access_token_expires,
+            )
+            logger.info(f"Login successful for {form_data.username}")
+            return {"access_token": access_token, "token_type": "bearer"}
+        else:
+            logger.error(
+                f"Login attempt failed for {form_data.username}: Incorrect credentials"
+            )
+            raise HTTPException(status_code=401, detail="Incorrect email or password.")
+    except Exception as exc:
+        logger.error(f"Exception during login for {form_data.username}: {str(exc)}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @router.get(
@@ -373,4 +374,60 @@ async def verify_email(
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Invalid or expired verification token",
+    )
+
+
+@router.put(
+    "/upload/{user_id}",
+    response_model=UserResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    name="update_image",
+    tags=["User Management Requires (Admin or Manager Roles)"],
+)
+async def update_image(
+    user_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+    current_user: dict = Depends(require_role(["ADMIN", "MANAGER"])),
+    file: UploadFile = File(...),
+):
+    """
+    Update user information.
+    - **user_id**: UUID of the user to update.
+    - **user_update**: UserUpdate model with updated user information.
+    """
+    if not allowed_file(file):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Select an Image with '.png', '.jpg', '.jpeg' extension",
+        )
+    if file.size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File Size too big"
+        )
+    image_url = await upload(file, user_id)
+    updated_user = await UserService.upload(
+        db, user_id, {"profile_picture_url": image_url}
+    )
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    return UserResponse.model_construct(
+        id=updated_user.id,
+        bio=updated_user.bio,
+        first_name=updated_user.first_name,
+        last_name=updated_user.last_name,
+        nickname=updated_user.nickname,
+        email=updated_user.email,
+        role=updated_user.role,
+        last_login_at=updated_user.last_login_at,
+        profile_picture_url=updated_user.profile_picture_url,
+        github_profile_url=updated_user.github_profile_url,
+        linkedin_profile_url=updated_user.linkedin_profile_url,
+        created_at=updated_user.created_at,
+        updated_at=updated_user.updated_at,
+        links=create_user_links(updated_user.id, request),
     )
